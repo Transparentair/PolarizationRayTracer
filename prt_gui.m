@@ -64,8 +64,8 @@ sceneTab=uitab(tabs,'Title','三维布局');
 results=uigridlayout(resultTab,[3 1]);
 results.RowHeight={34,'1x',27};
 results.Padding=[0 0 0 0];
-toolbar=uigridlayout(results,[1 10]);
-toolbar.ColumnWidth={55,135,65,92,86,77,78,98,77,'1x'};
+toolbar=uigridlayout(results,[1 11]);
+toolbar.ColumnWidth={55,135,65,92,86,77,78,98,77,82,'1x'};
 toolbar.Padding=[0 0 0 0];
 uilabel(toolbar,'Text','结果视图');
 viewType=uidropdown(toolbar,'Tag','resultView','Items',{'XY 方位角 (°)','XY 椭圆率角 (°)','场模平方 |E|²','相对光程 (mm)','有效光线','YZ 光线轨迹','XY 偏振度','XY S3/S0','偏振椭圆图','全局 |Ex|²','全局 |Ey|²','全局 |Ez|²'}, ...
@@ -79,6 +79,7 @@ exportCsv=uibutton(toolbar,'Text','诊断 CSV','Enable','off','ButtonPushedFcn',
 exportMap=uibutton(toolbar,'Text','偏振态 CSV','Enable','off','ButtonPushedFcn',@savePolarizationCsv, ...
     'Tooltip','导出二维 Jones、全局三维 Jones 或局部 Stokes，表头与导入相同。');
 exportPng=uibutton(toolbar,'Text','导出 PNG','Enable','off','ButtonPushedFcn',@saveEllipse);
+uibutton(toolbar,'Text','重置视图','ButtonPushedFcn',@(~,~) redraw());
 summary=uilabel(toolbar,'Text','','HorizontalAlignment','right');
 charts=uigridlayout(results,[1 2]);
 charts.Padding=[0 0 0 0];
@@ -86,14 +87,16 @@ charts.ColumnWidth={0,'1x'};
 inputAxes=uiaxes(charts,'Tag','inputAxes','Visible','off');
 ax=uiaxes(charts,'Tag','resultAxes');
 readout=uilabel(results,'Text','','FontColor',[0.27 0.36 0.46]);
-fig.WindowButtonDownFcn=@clearReadoutOnBackground;
+fig.WindowButtonDownFcn=@beginPlotDrag;
+fig.WindowButtonUpFcn=@finishPlotDrag;
+fig.WindowScrollWheelFcn=@scrollPlot;
 scene=uigridlayout(sceneTab,[2 2]);
 scene.RowHeight={27,'1x'};
 scene.ColumnWidth={490,'1x'};
 sceneNote=uilabel(scene,'Text','勾选「全局」后独立定位。XYZ/U/V：mm；Rx/Ry/Rz：°。');
-sceneControls=uigridlayout(scene,[1 5]);
+sceneControls=uigridlayout(scene,[1 6]);
 sceneControls.Padding=[0 0 0 0];
-sceneControls.ColumnWidth={100,48,86,48,86};
+sceneControls.ColumnWidth={100,48,86,48,86,78};
 sceneView=uidropdown(sceneControls,'Items',{'三维视图','XY 平面','XZ 平面','YZ 平面'}, ...
     'ItemsData',1:4,'ValueChangedFcn',@changeSceneView);
 uilabel(sceneControls,'Text','起始面');
@@ -102,6 +105,7 @@ fromFace=uidropdown(sceneControls,'Items',surfaceTable.RowName,'ItemsData',0:siz
 uilabel(sceneControls,'Text','结束面');
 toFace=uidropdown(sceneControls,'Items',surfaceTable.RowName,'ItemsData',0:size(exampleRows,1)-1, ...
     'Value',size(exampleRows,1)-1,'ValueChangedFcn',@changeSceneRange);
+uibutton(sceneControls,'Text','重置视图','ButtonPushedFcn',@resetSceneView);
 poseTable=uitable(scene,'ColumnName',{'全局','X','Y','Z','Rx','Ry','Rz','口径 U','口径 V'}, ...
     'ColumnFormat',{'logical','numeric','numeric','numeric','numeric','numeric','numeric','numeric','numeric'}, ...
     'ColumnEditable',true(1,9),'ColumnWidth',{49,49,49,49,48,48,48,53,53}, ...
@@ -118,6 +122,7 @@ model=[];
 pupil=[];
 initial=[];
 pupilData=[];
+drag=[];
 pupilConfig=struct('mode','auto','values',[]);
 changeSceneView([],[]);
 redrawScene();
@@ -170,10 +175,140 @@ redrawScene();
         markDirty([],[]);
     end
 
-    function clearReadoutOnBackground(~,~)
+    function [target,hit]=plotAtPointer()
         hit=hittest(fig);
-        if isempty(hit) || ~isprop(hit,'Tag') || ~strcmp(hit.Tag,'polarizationSamples')
-            readout.Text='';
+        if ~isempty(hit)
+            if isequal(hit,ax) || isequal(hit,inputAxes) || isequal(hit,sceneAxes), target=hit;
+            else, target=ancestor(hit,'axes'); end
+            if isequal(target,ax) || isequal(target,inputAxes) || isequal(target,sceneAxes), return; end
+        end
+        target=[];
+        if tabs.SelectedTab==sceneTab
+            candidates=sceneAxes;
+        else
+            candidates=ax;
+            if strcmp(inputAxes.Visible,'on'), candidates=[inputAxes ax]; end
+        end
+        point=fig.CurrentPoint;
+        for k=1:numel(candidates)
+            try
+                box=getpixelposition(candidates(k),true);
+            catch
+                continue
+            end
+            if all(point>=box(1:2)) && all(point<=box(1:2)+box(3:4))
+                target=candidates(k);
+                return
+            end
+        end
+    end
+
+    function state=plotSnapshot(target)
+        [az,el]=view(target);
+        point=target.CurrentPoint;
+        box=target.Position;
+        dims=[1 2];
+        if target==sceneAxes
+            % The display axes are [Z,X,Y] in the scene.
+            planes={[],[2 3],[1 2],[1 3]};
+            dims=planes{sceneView.Value};
+        end
+        state=struct('limits',[target.XLim;target.YLim;target.ZLim], ...
+            'view',[az el],'cameraAngle',target.CameraViewAngle,'dims',dims, ...
+            'pixelSize',box(3:4),'pivot',point(1,:).');
+    end
+
+    function beginPlotDrag(~,~)
+        readout.Text='';
+        [target,hit]=plotAtPointer();
+        if isempty(target), return; end
+        if strcmp(fig.SelectionType,'open')
+            if target==sceneAxes, resetSceneView([],[]); else, redraw(); end
+            return
+        end
+        state=plotSnapshot(target);
+        action='pan';
+        marker=[];
+        if strcmp(fig.SelectionType,'alt') && ~isempty(state.dims)
+            action='box';
+            marker=line(target,NaN,NaN,NaN,'Color',[0.10 0.32 0.52],'LineStyle','--', ...
+                'PickableParts','none','HandleVisibility','off');
+        elseif ~strcmp(fig.SelectionType,'normal')
+            return
+        elseif isempty(state.dims)
+            action='orbit';
+        end
+        drag=struct('axis',target,'start',fig.CurrentPoint,'state',state, ...
+            'hit',hit,'moved',false,'action',action,'marker',marker);
+        fig.WindowButtonMotionFcn=@movePlotDrag;
+    end
+
+    function movePlotDrag(~,~)
+        if isempty(drag) || ~isvalid(drag.axis), return; end
+        delta=fig.CurrentPoint-drag.start;
+        if ~drag.moved && max(abs(delta))<4, return; end
+        drag.moved=true;
+        switch drag.action
+            case 'orbit'
+                state=prt_plot_gesture(drag.state,'orbit',delta);
+                view(drag.axis,state.view(1),state.view(2));
+            case 'pan'
+                state=prt_plot_gesture(drag.state,'pan',delta);
+                setPlotLimits(drag.axis,state.limits,state.dims);
+            case 'box'
+                point=drag.axis.CurrentPoint;
+                state=prt_plot_gesture(drag.state,'box',point(1,:).');
+                corners=repmat(mean(state.limits,2),1,5);
+                corners(state.dims(1),:)=state.limits(state.dims(1),[1 2 2 1 1]);
+                corners(state.dims(2),:)=state.limits(state.dims(2),[1 1 2 2 1]);
+                set(drag.marker,'XData',corners(1,:),'YData',corners(2,:),'ZData',corners(3,:));
+        end
+    end
+
+    function finishPlotDrag(~,~)
+        fig.WindowButtonMotionFcn=[];
+        if isempty(drag), return; end
+        ended=drag;
+        drag=[];
+        if strcmp(ended.action,'box')
+            if isvalid(ended.marker), delete(ended.marker); end
+            if ended.moved
+                point=ended.axis.CurrentPoint;
+                state=prt_plot_gesture(ended.state,'box',point(1,:).');
+                if all(diff(state.limits(state.dims,:),1,2)>0)
+                    setPlotLimits(ended.axis,state.limits,state.dims);
+                end
+            end
+            return
+        end
+        hit=ended.hit;
+        if ended.moved || max(abs(fig.CurrentPoint-ended.start))>=4 || ...
+                isempty(hit) || ~isvalid(hit) || ~isprop(hit,'Tag') || ...
+                ~strcmp(hit.Tag,'polarizationSamples')
+            return
+        end
+        sample=hit.UserData;
+        point=ended.axis.CurrentPoint;
+        showSample(point(1,:),sample.coords,sample.values,sample.ids,sample.plane);
+    end
+
+    function scrollPlot(~,event)
+        [target,~]=plotAtPointer();
+        if isempty(target) || ~isempty(drag), return; end
+        state=prt_plot_gesture(plotSnapshot(target),'zoom',event.VerticalScrollCount);
+        if isempty(state.dims)
+            target.CameraViewAngle=state.cameraAngle;
+        else
+            setPlotLimits(target,state.limits,state.dims);
+        end
+    end
+
+    function setPlotLimits(target,limits,dims)
+        names={'XLim','YLim','ZLim'};
+        for k=dims
+            if limits(k,2)>limits(k,1)
+                target.(names{k})=limits(k,:);
+            end
         end
     end
 
@@ -199,6 +334,12 @@ redrawScene();
         % The plot axes are ordered Z, X, Y so +Z is screen-right.
         angles=[0 18;90 0;0 90;0 0];
         view(sceneAxes,angles(sceneView.Value,1),angles(sceneView.Value,2));
+    end
+
+    function resetSceneView(~,~)
+        sceneAxes.CameraViewAngleMode='auto';
+        changeSceneView([],[]);
+        redrawScene();
     end
 
     function changeSceneRange(control,~)
@@ -284,6 +425,7 @@ redrawScene();
         if ~isempty(pupilData), displayDiameter=max(displayDiameter,2*max(vecnorm(pupilData.xy))); end
         prt_draw_scene(sceneAxes,surfaces,source,displayDiameter,result,initial, ...
             [fromFace.Value,toFace.Value]);
+        enablePlotNavigation(sceneAxes);
     end
 
     function rememberSelection(~,event)
@@ -615,8 +757,8 @@ redrawScene();
         show=ok & isfinite(values) & all(isfinite(coords),1);
         plotIds=find(show);
         scatter(target,coords(1,show),coords(2,show),12,values(show),'filled', ...
-            'Tag','polarizationSamples','ButtonDownFcn', ...
-            @(~,event) showSample(event,coords,values,plotIds,planeName));
+            'Tag','polarizationSamples','UserData', ...
+            struct('coords',coords,'values',values,'ids',plotIds,'plane',planeName));
         axis(target,'equal');
         if viewType.Value==5
             xlabel(target,'入瞳 X (mm)'); ylabel(target,'入瞳 Y (mm)');
@@ -648,14 +790,13 @@ redrawScene();
     end
 
     function enablePlotNavigation(target)
-        % Keep pan/zoom, without re-enabling sticky built-in data tips.
-        target.Interactions=[panInteraction zoomInteraction];
-        axtoolbar(target,{'pan','zoomin','zoomout','restoreview'});
+        % A single figure-level handler owns drag and scroll on these axes.
+        disableDefaultInteractivity(target);
+        if ~isempty(target.Toolbar), target.Toolbar.Visible='off'; end
     end
 
-    function showSample(event,coords,values,plotIds,planeName)
+    function showSample(pt,coords,values,plotIds,planeName)
         if isempty(plotIds), return; end
-        pt=event.IntersectionPoint;
         [~,nearest]=min(sum((coords(:,plotIds)-reshape(pt(1:2),2,1)).^2,1));
         id=plotIds(nearest);
         readout.Text=sprintf('%s · 光线 %d · X %.6g mm · Y %.6g mm · %s %.6g', ...

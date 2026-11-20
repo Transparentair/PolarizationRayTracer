@@ -71,7 +71,7 @@ X_mm,Y_mm,ExRe,ExIm,EyRe,EyIm,EzRe,EzIm,Kx,Ky,Kz
 
 结果栏用「出瞳 / 像面」切换输出面。勾选「输入/输出」可并排查看入瞳与所选输出面，同一指标共用色标。点选散点后，图下方显示坐标、光线号和指标值；点击其他位置或切换视图清除读数。偏振方位角从各平面的局部 +X 轴向 +Y 量到椭圆长轴，±90° 对应同一振荡轴。偏振椭圆图中的切向箭头表示旋向，双向箭头表示线偏振轴。
 
-在偏振图上拖动可平移，滚轮可缩放。轴工具栏还提供平移、放大、缩小和恢复视图。新增的「全局 |Ex|² / |Ey|² / |Ez|²」使用同一全局基显示各分量，偏振椭圆与 Stokes 仍是所选平面的局部 XY 结果。
+在偏振图和三维布局的二维投影视图中，左键拖动平移、右键拖动框选放大。三维视图中左键拖动旋转。滚轮缩放，双击图或点击「重置视图」恢复初始范围。「全局 |Ex|² / |Ey|² / |Ez|²」使用同一全局基显示各分量，偏振椭圆与 Stokes 仍是所选平面的局部 XY 结果。
 
 「三维布局」支持三维、XY、XZ、YZ 视图，默认光轴 +Z 向右。用「起始面」「结束面」裁剪可见光面、玻璃侧壁和光线路径。最多显示 17 条代表光线，完整追迹与导出仍使用全部采样。
 
@@ -99,6 +99,7 @@ X_mm,Y_mm,ExRe,ExIm,EyRe,EyIm,EzRe,EzIm,Kx,Ky,Kz
 | 界面与膜系 | `prt_interface.m`、`prt_coating.m` | 折反射方向、复数 Fresnel 系数、各向同性多层膜。 |
 | 出入瞳与结果 | `prt_pupil_frames.m`、`prt_exit_pupil.m`、`prt_gui_trace.m` | 近轴瞳或手动参考面；计算各面局部偏振与有效掩膜。 |
 | 布局和椭圆 | `prt_scene_mesh.m`、`prt_scene_rays.m`、`prt_draw_scene.m`、`prt_pupil_ellipses.m`、`prt_ellipse.m` | 玻璃示意网格、轨迹抽样、局部偏振椭圆及旋向箭头。 |
+| 图形导航 | `prt_plot_gesture.m` | 将鼠标位移换算为二维轴范围或三维视角，不重绘追迹数据。 |
 
 ### 2. 入射采样、偏振态与坐标
 
@@ -130,6 +131,7 @@ test_prt_pupils
 test_prt_scene
 test_prt_triplet
 test_prt_pupil_import
+test_prt_plot_gesture
 ```
 
 默认库克三片式几何来自 [Optiland 的公开处方](https://github.com/optiland/optiland/issues/710)。示例用 SCHOTT N-SK16 / F2 的 d 线折射率，在当前单波长追迹器中调焦。有效焦距约 50.02 mm，设定后焦距 42.245 mm，默认轴上几何 RMS 斑点半径约 4.05 μm。更换波长需更新输入的折射率。
