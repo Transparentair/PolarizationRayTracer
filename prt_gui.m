@@ -32,8 +32,8 @@ uilabel(input,'Text','逐点偏振');
 mapActions=uigridlayout(input,[1 2]);
 mapActions.Padding=[0 0 0 0];
 mapActions.ColumnWidth={'1x',56};
-importButton=uibutton(mapActions,'Text','导入 CSV…','ButtonPushedFcn',@importPupil, ...
-    'Tooltip','CSV 列：X_mm,Y_mm 与 ExRe,ExIm,EyRe,EyIm 或 S0,S1,S2,S3');
+importTip='支持二维 Jones、三维 Jones（含全局 Kx/Ky/Kz）及 Stokes CSV。';
+importButton=uibutton(mapActions,'Text','导入 CSV…','ButtonPushedFcn',@importPupil,'Tooltip',importTip);
 clearMap=uibutton(mapActions,'Text','清除','Enable','off','ButtonPushedFcn',@clearPupil);
 uilabel(input,'Text','光程相位');
 phase=uicheckbox(input,'Text','计入相对 OPL 相位','ValueChangedFcn',@markDirty);
@@ -68,8 +68,8 @@ toolbar=uigridlayout(results,[1 10]);
 toolbar.ColumnWidth={55,135,65,92,86,77,78,98,77,'1x'};
 toolbar.Padding=[0 0 0 0];
 uilabel(toolbar,'Text','结果视图');
-viewType=uidropdown(toolbar,'Tag','resultView','Items',{'XY 方位角 (°)','XY 椭圆率角 (°)','场模平方 |E|²','相对光程 (mm)','有效光线','YZ 光线轨迹','XY 偏振度','XY S3/S0','偏振椭圆图'}, ...
-    'ItemsData',1:9,'ValueChangedFcn',@(~,~) redraw());
+viewType=uidropdown(toolbar,'Tag','resultView','Items',{'XY 方位角 (°)','XY 椭圆率角 (°)','场模平方 |E|²','相对光程 (mm)','有效光线','YZ 光线轨迹','XY 偏振度','XY S3/S0','偏振椭圆图','全局 |Ex|²','全局 |Ey|²','全局 |Ez|²'}, ...
+    'ItemsData',1:12,'ValueChangedFcn',@(~,~) redraw());
 resultPlane=uidropdown(toolbar,'Items',{'出瞳','像面'},'ItemsData',1:2, ...
     'ValueChangedFcn',@(~,~) redraw());
 uibutton(toolbar,'Text','设置出入瞳','ButtonPushedFcn',@editPupils);
@@ -77,7 +77,7 @@ compare=uicheckbox(toolbar,'Text','输入/输出','ValueChangedFcn',@(~,~) redra
 exportMat=uibutton(toolbar,'Text','导出 MAT','Enable','off','ButtonPushedFcn',@saveMat,'Tag','exportMat');
 exportCsv=uibutton(toolbar,'Text','诊断 CSV','Enable','off','ButtonPushedFcn',@saveCsv);
 exportMap=uibutton(toolbar,'Text','偏振态 CSV','Enable','off','ButtonPushedFcn',@savePolarizationCsv, ...
-    'Tooltip','导出所选出瞳或像面的局部偏振态，表头与导入相同。');
+    'Tooltip','导出二维 Jones、全局三维 Jones 或局部 Stokes，表头与导入相同。');
 exportPng=uibutton(toolbar,'Text','导出 PNG','Enable','off','ButtonPushedFcn',@saveEllipse);
 summary=uilabel(toolbar,'Text','','HorizontalAlignment','right');
 charts=uigridlayout(results,[1 2]);
@@ -164,7 +164,7 @@ redrawScene();
     function clearPupil(~,~)
         pupilData=[];
         importButton.Text='导入 CSV…';
-        importButton.Tooltip='CSV 列：X_mm,Y_mm 与 ExRe,ExIm,EyRe,EyIm 或 S0,S1,S2,S3';
+        importButton.Tooltip=importTip;
         clearMap.Enable='off';
         pol.Enable='on'; customButton.Enable='on'; samples.Enable='on';
         markDirty([],[]);
@@ -315,23 +315,24 @@ redrawScene();
     end
 
     function editPolarization(~,~)
-        forms={'jones','amplitude','ellipse','stokes'};
+        forms={'jones','amplitude','ellipse','stokes','jones3d'};
         labels={{'Re(Ex)','Im(Ex)','Re(Ey)','Im(Ey)'}, ...
             {'|Ex|','|Ey|','φy − φx (°)'}, ...
             {'方位角 ψ (°)','椭圆率角 χ (°)','S0'}, ...
-            {'S0','S1','S2','S3'}};
-        defaults={[1 0 0 0],[1 1 0],[45 0 1],[1 1 0 0]};
+            {'S0','S1','S2','S3'}, ...
+            {'全局 Re(Ex)','全局 Im(Ex)','全局 Re(Ey)','全局 Im(Ey)','全局 Re(Ez)','全局 Im(Ez)'}};
+        defaults={[1 0 0 0],[1 1 0],[45 0 1],[1 1 0 0],[1 0 0 0 0 0]};
         index=find(strcmp(forms,customForm),1);
         defaults{index}=customValues;
-        dialog=uifigure('Name','自定义入射偏振','WindowStyle','modal','Position',[230 160 435 310]);
-        grid=uigridlayout(dialog,[7 2]);
+        dialog=uifigure('Name','自定义入射偏振','WindowStyle','modal','Position',[230 160 455 365]);
+        grid=uigridlayout(dialog,[9 2]);
         grid.ColumnWidth={130,'1x'};
-        grid.RowHeight={28,28,28,28,28,'1x',30};
+        grid.RowHeight={28,28,28,28,28,28,28,'1x',30};
         uilabel(grid,'Text','描述形式');
-        choice=uidropdown(grid,'Items',{'Jones 实部与虚部','振幅与相位差','偏振椭圆','Stokes 向量'}, ...
-            'ItemsData',1:4,'Value',index,'ValueChangedFcn',@changeForm);
-        names=gobjects(1,4); entries=gobjects(1,4);
-        for j=1:4
+        choice=uidropdown(grid,'Items',{'二维 Jones（局部 XY）','振幅与相位差','偏振椭圆','Stokes 向量','三维 Jones（全局 XYZ）'}, ...
+            'ItemsData',1:5,'Value',index,'ValueChangedFcn',@changeForm);
+        names=gobjects(1,6); entries=gobjects(1,6);
+        for j=1:6
             names(j)=uilabel(grid);
             entries(j)=uieditfield(grid,'numeric');
         end
@@ -349,7 +350,7 @@ redrawScene();
 
         function displayForm(kind)
             count=numel(labels{kind});
-            for a=1:4
+            for a=1:6
                 if a<=count
                     names(a).Text=labels{kind}{a};
                     entries(a).Value=defaults{kind}(a);
@@ -359,6 +360,11 @@ redrawScene();
                     names(a).Visible='off';
                     entries(a).Visible='off';
                 end
+            end
+            if kind==5
+                note.Text='全局电场须垂直于 OBJ 的发射方向。改变 OBJ 姿态后请重新检查。';
+            else
+                note.Text='S3 = 2 Im(conj(Ex) Ey)，S0 表示局部 XY 场模平方。';
             end
         end
 
@@ -541,6 +547,7 @@ redrawScene();
         if isempty(result), return; end
         if viewType.Value==6
             plotPaths();
+            enablePlotNavigation(ax);
             return
         end
         data=result.image;
@@ -561,7 +568,7 @@ redrawScene();
             drawPlane(inputAxes,result.input,'入瞳');
         end
         drawPlane(ax,data,planeName);
-        if compare.Value && any(viewType.Value==[3 4])
+        if compare.Value && any(viewType.Value==[3 4 10:12])
             common=[min([inputAxes.CLim(1),ax.CLim(1)]),max([inputAxes.CLim(2),ax.CLim(2)])];
             clim(inputAxes,common); clim(ax,common);
         end
@@ -569,10 +576,9 @@ redrawScene();
     end
 
     function drawPlane(target,data,planeName)
-        disableDefaultInteractivity(target);
-        axtoolbar(target,{'pan','zoomin','zoomout','restoreview'});
         if viewType.Value==9
             plotEllipses(target,data,planeName);
+            enablePlotNavigation(target);
             return
         end
         ok=data.valid;
@@ -603,6 +609,8 @@ redrawScene();
                 values(S(1,:)==0)=NaN;
             case 8
                 values=data.stokesXY(4,:)./data.stokesXY(1,:);
+            case {10,11,12}
+                values=data.globalComponentsSquared(viewType.Value-9,:);
         end
         show=ok & isfinite(values) & all(isfinite(coords),1);
         plotIds=find(show);
@@ -636,6 +644,13 @@ redrawScene();
         if ~any(show)
             text(target,0.5,0.5,'没有可显示的数值','Units','normalized','HorizontalAlignment','center');
         end
+        enablePlotNavigation(target);
+    end
+
+    function enablePlotNavigation(target)
+        % Keep pan/zoom, without re-enabling sticky built-in data tips.
+        target.Interactions=[panInteraction zoomInteraction];
+        axtoolbar(target,{'pan','zoomin','zoomout','restoreview'});
     end
 
     function showSample(event,coords,values,plotIds,planeName)
@@ -753,10 +768,13 @@ redrawScene();
             uialert(fig,['没有可导出的' plane '偏振采样。'],'无有效数据'); return
         end
         formats={'Stokes','取消'};
-        if ~isempty(data.jonesXY), formats=[{'Jones'},formats]; end
-        format=uiconfirm(fig,['导出' plane '局部 XY 偏振态。'],'选择 CSV 格式', ...
+        if ~isempty(data.jonesXY), formats=[{'Jones 3D','Jones 2D'},formats]; end
+        choice=uiconfirm(fig,['导出' plane '偏振态。三维 Jones 的 E 和 K 使用全局坐标。'],'选择 CSV 格式', ...
             'Options',formats,'DefaultOption',1,'CancelOption',numel(formats));
-        if strcmp(format,'取消'), return; end
+        if strcmp(choice,'取消'), return; end
+        format=choice;
+        if strcmp(choice,'Jones 3D'), format='Jones3D'; end
+        if strcmp(choice,'Jones 2D'), format='Jones'; end
         [file,folder]=uiputfile('*.csv','导出偏振态 CSV',[stem '_' lower(format) '.csv']);
         if isequal(file,0), return; end
         try

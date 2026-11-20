@@ -40,19 +40,27 @@ else
 end
 count=size(pupil,2);
 entrancePoints=entrance.origin+entrance.rotation*[pupil;zeros(1,count)];
-launchOffset=dot(source.origin-entrance.origin,source.rotation(:,3));
-initial=entrancePoints+launchOffset*source.rotation(:,3);
-direction=repmat(source.rotation(:,3),1,count);
+sourceNormal=source.rotation(:,3);
+direction=repmat(sourceNormal,1,count);
 % Presets 4/5: right/left circular, with exp(+i*omega*t), looking toward the source.
 states=[1 0 1/sqrt(2) 1/sqrt(2) 1/sqrt(2); ...
         0 1 1/sqrt(2) 1i/sqrt(2) -1i/sqrt(2);zeros(1,5)];
+vectorMap=mapped && strcmp(options.pupilData.format,'Jones3D');
 if mapped
     inputModes=options.pupilData.modes;
+    if vectorMap
+        direction=prt_require_transverse(inputModes,options.pupilData.direction);
+    end
     model.inputMap=rmfield(options.pupilData,'modes');
     model.pupilDiameter_mm=max(options.diameter,2*max(vecnorm(pupil)));
 elseif options.polarization==6
     modes=prt_polarization(options.customForm,options.customValues);
     model.customInput=struct('form',options.customForm,'values',options.customValues);
+    if strcmp(options.customForm,'jones3d')
+        prt_require_transverse(modes,sourceNormal);
+        modes=source.rotation.'*modes;
+        modes=modes(1:2,:);
+    end
 elseif options.polarization==7
     modes=[-1;1]/sqrt(2);
 else
@@ -64,7 +72,19 @@ if ~mapped
     inputModes=repmat(reshape(modes,2,1,[]),1,count,1);
 end
 modeCount=size(inputModes,3);
-hasJonesField=modeCount==1 && (~mapped || strcmp(options.pupilData.format,'Jones'));
+hasJonesField=modeCount==1 && (~mapped || startsWith(options.pupilData.format,'Jones'));
+if vectorMap
+    globalModes=inputModes;
+    inputModes=source.rotation.'*globalModes;
+else
+    globalModes=reshape(source.rotation*[reshape(inputModes,2,[]); ...
+        zeros(1,count*modeCount)],3,count,modeCount);
+end
+normalCosine=sourceNormal.'*direction;
+assert(all(normalCosine>1e-10),'三维入射光线须从 OBJ 正向发射。请检查 Kx/Ky/Kz 和 OBJ 姿态。');
+launchOffset=dot(source.origin-entrance.origin,sourceNormal)./normalCosine;
+initial=entrancePoints+direction.*launchOffset;
+initialOPL=surfaces(1).n1*launchOffset;
 if ~isLde && isfield(options,'coatings')
     assert(numel(options.coatings)==numel(model.surfaces),'膜系数量与光面数不一致。');
     for h=1:numel(model.surfaces)
@@ -81,15 +101,14 @@ if isfield(surfaces,'frame') && ~isempty(surfaces(end).frame)
     imaR=surfaces(end).frame.rotation; imaOrigin=surfaces(end).frame.origin;
 end
 for j=1:modeCount
-    field=source.rotation*[inputModes(:,:,j);zeros(1,count)];
+    field=globalModes(:,:,j);
     if isempty(exit)
-        ray=prt_trace(model.surfaces,initial,direction,field,wavelength,options.phase);
+        ray=prt_trace(model.surfaces,initial,direction,field,wavelength,options.phase,initialOPL);
     else
-        [ray,pre]=prt_trace(model.surfaces,initial,direction,field,wavelength,options.phase);
+        [ray,pre]=prt_trace(model.surfaces,initial,direction,field,wavelength,options.phase,initialOPL);
         if isempty(pre)
             pre=ray;
         end
-        pre.OPL=pre.OPL+surfaces(1).n1*launchOffset;
         pupilRay=prt_exit_pupil(pre,exit,surfaces(end).n1,wavelength,options.phase);
         if j==1
             exitResult=pupilRay;
@@ -103,27 +122,39 @@ for j=1:modeCount
     end
     propagated(:,:,j)=ray.E;
 end
-result.OPL=result.OPL+surfaces(1).n1*launchOffset;
 result.modeFields=propagated;
 result.totalFieldSquared=sum(sum(abs(propagated).^2,1),3);
 result.stokesXY=fieldStokes(propagated);
 result.input=struct('xy',pupil,'stokesXY',fieldStokes(inputModes), ...
     'valid',true(1,count),'OPL',zeros(1,count), ...
-    'totalFieldSquared',sum(sum(abs(inputModes).^2,1),3),'modeFields',inputModes);
+    'totalFieldSquared',sum(sum(abs(globalModes).^2,1),3),'modeFields',inputModes, ...
+    'directionGlobal',direction,'jonesGlobal',[], ...
+    'globalComponentsSquared',sum(abs(globalModes).^2,3));
+if hasJonesField, result.input.jonesGlobal=globalModes(:,:,1); end
 if isLde
     local=imaR.'*(result.position-imaOrigin);
     localModes=reshape(imaR.'*reshape(propagated,3,[]),size(propagated));
     result.image=struct('xy',local(1:2,:),'stokesXY',fieldStokes(localModes), ...
         'valid',result.valid,'OPL',result.OPL,'totalFieldSquared',result.totalFieldSquared, ...
-        'jonesXY',[]);
-    if hasJonesField, result.image.jonesXY=localModes(1:2,:,1); end
+        'jonesXY',[],'jonesGlobal',[],'directionGlobal',result.direction, ...
+        'globalComponentsSquared',sum(abs(propagated).^2,3));
+    if hasJonesField
+        result.image.jonesXY=localModes(1:2,:,1);
+        result.image.jonesGlobal=propagated(:,:,1);
+    end
 end
 if ~isempty(exitResult)
     exitResult.modeFields=exitModes;
     exitResult.totalFieldSquared=sum(sum(abs(exitModes).^2,1),3);
     exitResult.stokesXY=fieldStokes(exitModes);
+    exitGlobalModes=reshape(exit.rotation*reshape(exitModes,3,[]),size(exitModes));
+    exitResult.globalComponentsSquared=sum(abs(exitGlobalModes).^2,3);
     exitResult.jonesXY=[];
-    if hasJonesField, exitResult.jonesXY=exitResult.E(1:2,:); end
+    exitResult.jonesGlobal=[];
+    if hasJonesField
+        exitResult.jonesXY=exitResult.E(1:2,:);
+        exitResult.jonesGlobal=exitGlobalModes(:,:,1);
+    end
     if ~hasJonesField, exitResult.E(:)=complex(NaN,NaN); end
 end
 result.exitPupil=exitResult;

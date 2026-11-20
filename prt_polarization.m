@@ -8,6 +8,9 @@ switch form
     case 'jones'
         assert(numel(v)==4,'Jones 需要 Ex、Ey 的实部与虚部。');
         modes=[complex(v(1),v(2));complex(v(3),v(4))];
+    case 'jones3d'
+        assert(numel(v)==6,'三维 Jones 需要 Ex、Ey、Ez 的实部与虚部。');
+        modes=complex(v(1:2:end),v(2:2:end));
     case 'amplitude'
         assert(numel(v)==3 && all(v(1:2)>=0),'振幅必须非负。');
         modes=[v(1);v(2)*exp(1i*deg2rad(v(3)))];

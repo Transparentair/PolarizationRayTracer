@@ -1,4 +1,4 @@
-function [out,beforeLast] = prt_trace(surfaces,P0,k,E,wavelength,includeOPLPhase)
+function [out,beforeLast] = prt_trace(surfaces,P0,k,E,wavelength,includeOPLPhase,initialOPL)
 % Numeric 3-by-N batch tracer; surface n1/n2 are explicit, including mirrors.
 % wavelength OPTIONAL, same unit as positions; e.g. 1550 nm = 0.00155 mm.
 % Optional surfaces(h).layers uses [n,kappa,thickness] in wavelength units.
@@ -10,6 +10,10 @@ assert(isreal(P0) && isreal(k) && all(isfinite(P0(:))) && all(isfinite(k(:))) &&
 assert(all(vecnorm(k)>0)); k=k./vecnorm(k);
 E=E-k.*sum(k.*E,1); % Explicit transverse projection of supplied global input.
 count=size(k,2); valid=true(1,count); opl=zeros(1,count);
+if nargin>=7
+    validateattributes(initialOPL,{'numeric'},{'real','finite','size',[1,count]});
+    opl=initialOPL;
+end
 history=cell(1,numel(surfaces));
 beforeLast=[];
 for h=1:numel(surfaces)

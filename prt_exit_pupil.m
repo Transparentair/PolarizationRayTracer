@@ -7,11 +7,13 @@ t=-p(3,:)./k(3,:);
 valid=ray.valid & abs(k(3,:))>1e-12 & isfinite(t);
 out.xy=p(1:2,:)+k(1:2,:).*t;
 out.position=ray.position+ray.direction.*t;
+out.directionGlobal=ray.direction;
 out.E=R.'*ray.E;
 out.OPL=ray.OPL+n*t;
 out.valid=valid;
 out.xy(:,~valid)=NaN;
 out.position(:,~valid)=NaN;
+out.directionGlobal(:,~valid)=NaN;
 out.E(:,~valid)=NaN;
 out.OPL(~valid)=NaN;
 if includePhase && any(valid)

@@ -46,6 +46,34 @@ catch problem
     rejected=contains(problem.message,'重合');
 end
 assert(rejected);
+
+% Both input and exported 3D fields retain Ez, direction and relative phase.
+K=[0 0 0.6 0;0 0 0 0;1 1 0.8 1];
+E=[1 0 0.8 1;1i 1 1i 0;0 0 -0.6 0];
+components=[real(E(1,:));imag(E(1,:));real(E(2,:));imag(E(2,:)); ...
+    real(E(3,:));imag(E(3,:));K].';
+[~,~,~,columns]=prt_pupil_csv_columns();
+writeMap(components,columns);
+opts.pupilData=prt_load_pupil(file);
+opts.pupilConfig=struct('mode','manual','values',[0 0 -2 0 0 0;0 0 2 0 0 0]);
+opts.phase=true;
+r=prt_gui_trace(rows,opts);
+assert(max(abs(r.input.jonesGlobal-E),[],'all')<1e-12);
+assert(max(abs(r.OPL-9./K(3,:)))<1e-12);
+expected=E.*exp(-2i*pi*(9./K(3,:)-9)/(opts.wavelength*1e-6));
+assert(max(abs(r.image.jonesGlobal-expected),[],'all')<2e-10);
+assert(all(abs(sum(r.image.jonesGlobal.*r.image.directionGlobal,1))<1e-12));
+[exported,kept]=roundTrip(r.image,'Jones3D');
+assert(kept==4 && max(abs(exported.modes-expected),[],'all')<2e-10);
+assert(max(abs(exported.direction-K),[],'all')<1e-12);
+assert(abs(r.image.globalComponentsSquared(3,3)-0.36)<1e-12);
+rejected=false;
+try
+    prt_require_transverse([0;0;1],[0;0;1]);
+catch problem
+    rejected=contains(problem.message,'不垂直');
+end
+assert(rejected);
 fprintf('PASS: spatial Jones/Stokes CSV, irregular sampling and paired plane results\n');
 
     function writeMap(values,columns)

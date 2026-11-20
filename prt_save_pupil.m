@@ -1,6 +1,6 @@
 function count = prt_save_pupil(file,data,format)
 % Export valid ray samples in the selected plane's local XY coordinates.
-[xy,jones,stokes]=prt_pupil_csv_columns();
+[xy,jones,stokes,vector]=prt_pupil_csv_columns();
 valid=reshape(data.valid,1,[]);
 positions=data.xy(:,valid).';
 count=size(positions,1);
@@ -18,6 +18,14 @@ switch lower(format)
     case 'stokes'
         values=data.stokesXY(:,valid).';
         columns=[xy,stokes];
+    case 'jones3d'
+        assert(isfield(data,'jonesGlobal') && ~isempty(data.jonesGlobal), ...
+            '当前结果没有可导出的单一 Jones 三维复电场。请选择 Stokes。');
+        E=data.jonesGlobal(:,valid);
+        k=prt_require_transverse(E,data.directionGlobal(:,valid));
+        values=[real(E(1,:));imag(E(1,:));real(E(2,:));imag(E(2,:)); ...
+                real(E(3,:));imag(E(3,:));k].';
+        columns=[xy,vector];
     otherwise
         error('prt:csvFormat','请选择 Jones 或 Stokes。');
 end
@@ -26,7 +34,8 @@ assert(isreal(values) && all(isfinite(values),'all'),'有效追迹点含非有�
 assert(fid>=0,'无法写入文件：%s',message);
 cleanup=onCleanup(@() fclose(fid));
 fprintf(fid,'%s\n',strjoin(columns,','));
-fprintf(fid,'%.17g,%.17g,%.17g,%.17g,%.17g,%.17g\n',[positions,values].');
+rowFormat=[repmat('%.17g,',1,numel(columns)-1),'%.17g\n'];
+fprintf(fid,rowFormat,[positions,values].');
 [message,code]=ferror(fid);
 assert(code==0,'写入 CSV 失败：%s',message);
 clear cleanup
