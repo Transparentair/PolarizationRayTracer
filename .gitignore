@@ -1,0 +1,12 @@
+/runtime_prefs/
+/matlab_log.txt
+/test_results.txt
+/validation_log.txt
+*.asv
+*.autosave
+*.m~
+*.mlx~
+*.mat
+*.csv
+*.zip
+*.log
